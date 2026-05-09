@@ -24,15 +24,6 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Debug Android environment
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          ls -la "$ANDROID_HOME" 2>/dev/null || echo "ANDROID_HOME not accessible"
-          ls -la "$ANDROID_SDK_ROOT" 2>/dev/null || echo "ANDROID_SDK_ROOT not accessible"
-          echo "JAVA_HOME=$JAVA_HOME"
-          java -version 2>&1
-
       - name: Create local.properties
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
 
@@ -40,17 +31,15 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build debug APK
-        run: |
-          ./gradlew assembleDebug --no-daemon --no-build-cache --info 2>&1 | tail -100
+        run: ./gradlew assembleDebug --no-daemon --no-build-cache
 
       - name: Upload to Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0
           name: LocalADB v1.0
           draft: false
           prerelease: false
-          files: app/build/outputs/apk/debug/*.apk
+          files: app/build/outputs/apk/debug/app-debug.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
