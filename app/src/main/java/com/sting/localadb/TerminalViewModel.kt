@@ -9,9 +9,9 @@ import kotlinx.coroutines.launch
 data class TerminalState(
     val outputLines: List<String> = listOf(
         "LocalADB v1.0",
-        "Android 本机 ADB Shell",
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        "首次使用：请先在"配对设置"中添加无线调试配对信息",
+        "Local ADB Shell for Android",
+        "================================",
+        "First time: Tap Pairing Settings to add wireless debugging",
         ""
     ),
     val isConnected: Boolean = false,
@@ -59,28 +59,28 @@ class TerminalViewModel : ViewModel() {
     fun pairAndConnect(address: String, pairingCode: String) {
         viewModelScope.launch {
             _state.value = _state.value.copy(
-                outputLines = _state.value.outputLines + "正在配对 $address..."
+                outputLines = _state.value.outputLines + "Pairing $address..."
             )
             val paired = adbManager?.pair(address, pairingCode) ?: false
             if (paired) {
                 _state.value = _state.value.copy(
-                    outputLines = _state.value.outputLines + "配对成功，正在连接..."
+                    outputLines = _state.value.outputLines + "Pairing successful, connecting..."
                 )
                 val connected = adbManager?.connect(address) ?: false
                 if (connected) {
                     _state.value = _state.value.copy(
                         isConnected = true,
                         showPairingDialog = false,
-                        outputLines = _state.value.outputLines + "✓ 连接成功！可以执行命令了"
+                        outputLines = _state.value.outputLines + "Connected! You can now execute commands"
                     )
                 } else {
                     _state.value = _state.value.copy(
-                        outputLines = _state.value.outputLines + "✗ 连接失败"
+                        outputLines = _state.value.outputLines + "Connection failed"
                     )
                 }
             } else {
                 _state.value = _state.value.copy(
-                    outputLines = _state.value.outputLines + "✗ 配对失败，请检查地址和配对码"
+                    outputLines = _state.value.outputLines + "Pairing failed. Check address and pairing code"
                 )
             }
         }
