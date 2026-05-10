@@ -1,181 +1,363 @@
 package com.sting.localadb
 
+import android.app.Notification
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.View
+import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.app.NotificationCompat
+import androidx.core.app.RemoteInput
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.sting.localadb.ui.theme.LocalADBTheme
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var notificationManager: NotificationManager
+    private var pairingReceiver: BroadcastReceiver? = null
+
+    // Notification channel and IDs
+    companion object {
+        const val CHANNEL_ID = "localadb_pairing"
+        const val NOTIFICATION_ID = 1001
+        const val ACTION_PAIR_CODE = "com.sting.localadb.PAIR_CODE"
+        const val EXTRA_CODE = "pair_code"
+        const val KEY_CODE = "key_code"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        createNotificationChannel()
+        registerPairingReceiver()
+        showPairingNotification()
+
         setContent {
             LocalADBTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    TerminalScreen()
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    val viewModel: TerminalViewModel = viewModel()
+                    val uiState by viewModel.connectionState.collectAsState()
+                    val outputLines by viewModel.outputLines.collectAsState()
+                    val currentCommand by viewModel.currentCommand.collectAsState()
+                    val localIp by viewModel.localIp.collectAsState()
+                    val adbPort by viewModel.adbPort.collectAsState()
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFF1E1E1E))
+                            .padding(16.dp)
+                    ) {
+                        // Title
+                        Text(
+                            text = "LocalADB",
+                            color = Color(0xFF00FF00),
+                            fontSize = 24.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+
+                        // Status bar
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "IP: $localIp:$adbPort",
+                                color = Color(0xFF888888),
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = when (uiState) {
+                                    PairingService.ConnectionState.CONNECTED -> "✅ 已连接"
+                                    PairingService.ConnectionState.PAIRING -> "⏳ 配对中"
+                                    PairingService.ConnectionState.WAITING_PAIRING -> "⚠️ 等待配对"
+                                    PairingService.ConnectionState.ERROR -> "❌ 错误"
+                                    else -> "○ 未连接"
+                                },
+                                color = when (uiState) {
+                                    PairingService.ConnectionState.CONNECTED -> Color(0xFF00FF00)
+                                    PairingService.ConnectionState.PAIRING -> Color(0xFFFFFF00)
+                                    PairingService.ConnectionState.ERROR -> Color(0xFFFF0000)
+                                    else -> Color(0xFF888888)
+                                },
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Output area
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .background(Color(0xFF0D0D0D), RoundedCornerShape(8.dp))
+                                .padding(12.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.verticalScroll(rememberScrollState())
+                            ) {
+                                outputLines.forEach { line ->
+                                    Text(
+                                        text = line,
+                                        color = when {
+                                            line.startsWith("✅") -> Color(0xFF00FF00)
+                                            line.startsWith("❌") -> Color(0xFFFF4444)
+                                            line.startsWith("⚠️") -> Color(0xFFFFFF00)
+                                            line.startsWith("⏳") -> Color(0xFFFFFF00)
+                                            line.startsWith("→") -> Color(0xFF00CCFF)
+                                            line.startsWith("$") -> Color(0xFFFFFFFF)
+                                            line.startsWith("─") -> Color(0xFF444444)
+                                            else -> Color(0xFFCCCCCC)
+                                        },
+                                        fontSize = 14.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.padding(vertical = 1.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Command input
+                        val focusManager = LocalFocusManager.current
+                        val scope = rememberCoroutineScope()
+
+                        OutlinedTextField(
+                            value = currentCommand,
+                            onValueChange = { viewModel.updateCommand(it) },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = {
+                                Text(
+                                    text = "输入命令...",
+                                    color = Color(0xFF666666)
+                                )
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color(0xFFFFFFFF),
+                                unfocusedTextColor = Color(0xFFFFFFFF),
+                                focusedBorderColor = Color(0xFF00FF00),
+                                unfocusedBorderColor = Color(0xFF444444),
+                                cursorColor = Color(0xFF00FF00),
+                                focusedContainerColor = Color(0xFF1A1A1A),
+                                unfocusedContainerColor = Color(0xFF1A1A1A)
+                            ),
+                            fontFamily = FontFamily.Monospace,
+                            keyboardOptions = KeyboardOptions(
+                                capitalization = KeyboardCapitalization.None,
+                                imeAction = ImeAction.Send
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onSend = {
+                                    viewModel.executeCommand(currentCommand)
+                                    viewModel.updateCommand("")
+                                    focusManager.clearFocus()
+                                }
+                            ),
+                            singleLine = true
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Action buttons
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { viewModel.clearOutput() },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF333333)
+                                ),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("清空", color = Color(0xFFFFFFFF))
+                            }
+
+                            Button(
+                                onClick = {
+                                    if (uiState == PairingService.ConnectionState.WAITING_PAIRING) {
+                                        showPairingNotification()
+                                    } else {
+                                        viewModel.connect()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (uiState == PairingService.ConnectionState.WAITING_PAIRING)
+                                        Color(0xFF0066FF) else Color(0xFF00AA00)
+                                ),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = when (uiState) {
+                                        PairingService.ConnectionState.WAITING_PAIRING -> "配对"
+                                        PairingService.ConnectionState.CONNECTED -> "已连接"
+                                        else -> "连接"
+                                    },
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = android.app.NotificationChannel(
+                CHANNEL_ID,
+                "LocalADB 配对",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "无线 ADB 配对服务"
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun registerPairingReceiver() {
+        pairingReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == ACTION_PAIR_CODE) {
+                    val code = intent.getStringExtra(EXTRA_CODE) ?: ""
+                    if (code.length == 6) {
+                        // Forward to service
+                        val serviceIntent = Intent(this@MainActivity, PairingService::class.java).apply {
+                            action = PairingService.ACTION_PAIR
+                            putExtra(PairingService.EXTRA_CODE, code)
+                        }
+                        startService(serviceIntent)
+                    }
+                }
+            }
+        }
+
+        val filter = IntentFilter(ACTION_PAIR_CODE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(pairingReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(pairingReceiver, filter)
+        }
+    }
+
+    private fun showPairingNotification() {
+        val channelId = CHANNEL_ID
+
+        // Use RemoteInput for voice/typing input on Android 7+
+        val remoteInput = RemoteInput.Builder(KEY_CODE)
+            .setLabel("输入6位配对码")
+            .setChoices(arrayOf("123456", "111111", "222222"))
+            .build()
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        // Action to submit pairing code
+        val submitIntent = Intent(this, PairingReceiver::class.java).apply {
+            action = ACTION_PAIR_CODE
+        }
+        val submitPendingIntent = PendingIntent.getBroadcast(
+            this,
+            0,
+            submitIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val notificationCompatBuilder = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(android.R.drawable.ic_menu_terminal)
+            .setContentTitle("LocalADB 配对")
+            .setContentText("无线调试已开启，请在通知栏输入配对码")
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .extend(NotificationCompat.WearableExtender()
+                .addAction(
+                    android.R.drawable.ic_menu_preferences,
+                    "输入配对码",
+                    pendingIntent
+                )
+            )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
+            notificationCompatBuilder
+                .addAction(RemoteInput.buildRobotIconBackIcon())
+                .addRemoteInput(remoteInput)
+        }
+
+        notificationManager.notify(NOTIFICATION_ID, notificationCompatBuilder.build())
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        pairingReceiver?.let { unregisterReceiver(it) }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun TerminalScreen() {
-    val context = LocalContext.current
-    val viewModel = remember { TerminalViewModel() }
-    var command by remember { mutableStateOf("") }
-    var showPairing by remember { mutableStateOf(false) }
-    var pairAddress by remember { mutableStateOf("") }
-    var pairCode by remember { mutableStateOf("") }
-    val scrollState = rememberScrollState()
-    
-    LaunchedEffect(Unit) {
-        viewModel.init(context)
-    }
-    
-    LaunchedEffect(viewModel.outputLines.size) {
-        scrollState.animateScrollTo(scrollState.maxValue)
-    }
-    
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF1E1E1E))
-            .padding(16.dp)
-    ) {
-        // Connection Status
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = if (viewModel.isConnected) Color(0xFF2E7D32) else Color(0xFFB71C1C)
-            )
-        ) {
-            Text(
-                text = if (viewModel.isConnected) "✓ 已连接" else "✗ 未连接",
-                modifier = Modifier.padding(12.dp),
-                color = Color.White,
-                fontSize = 14.sp
-            )
-        }
-        
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        // Terminal Output
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .verticalScroll(scrollState)
-        ) {
-            viewModel.outputLines.forEach { line ->
-                Text(
-                    text = line,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                    color = Color(0xFF00FF00),
-                    modifier = Modifier.padding(vertical = 1.dp)
-                )
+/**
+ * Receiver for handling notification pairing code input
+ */
+class PairingReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+        if (intent?.action == MainActivity.ACTION_PAIR_CODE) {
+            val remoteInput = RemoteInput.getResultsFromIntent(intent)
+            val code = remoteInput?.getCharSequence(MainActivity.KEY_CODE)?.toString()
+
+            if (!code.isNullOrBlank()) {
+                // Send to service
+                val serviceIntent = Intent(context, PairingService::class.java).apply {
+                    action = PairingService.ACTION_PAIR
+                    putExtra(PairingService.EXTRA_CODE, code)
+                }
+                context?.startService(serviceIntent)
             }
         }
-        
-        Spacer(modifier = Modifier.height(8.dp))
-        
-        // Command Input
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            OutlinedTextField(
-                value = command,
-                onValueChange = { command = it },
-                modifier = Modifier.weight(1f),
-                label = { Text("ADB 命令", color = Color.Gray) },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedBorderColor = Color(0xFF00FF00),
-                    unfocusedBorderColor = Color.Gray
-                )
-            )
-            Button(
-                onClick = {
-                    if (command.isNotBlank()) {
-                        viewModel.executeCommand(command)
-                        command = ""
-                    }
-                },
-                enabled = viewModel.isConnected,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF00))
-            ) {
-                Text("执行", color = Color.Black)
-            }
-        }
-        
-        // Settings Button
-        TextButton(onClick = { showPairing = true }) {
-            Text("配对设置", color = Color(0xFF00BFFF))
-        }
-    }
-    
-    // Pairing Dialog
-    if (showPairing) {
-        AlertDialog(
-            onDismissRequest = { showPairing = false },
-            title = { Text("配对无线调试", color = Color.White) },
-            text = {
-                Column {
-                    OutlinedTextField(
-                        value = pairAddress,
-                        onValueChange = { pairAddress = it },
-                        label = { Text("地址 (IP:Port)", color = Color.Gray) },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        )
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = pairCode,
-                        onValueChange = { pairCode = it },
-                        label = { Text("配对码", color = Color.Gray) },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        )
-                    )
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    viewModel.pairAndConnect(pairAddress, pairCode)
-                    showPairing = false
-                }) {
-                    Text("配对")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showPairing = false }) {
-                    Text("取消", color = Color.Gray)
-                }
-            },
-            containerColor = Color(0xFF2D2D2D)
-        )
     }
 }
