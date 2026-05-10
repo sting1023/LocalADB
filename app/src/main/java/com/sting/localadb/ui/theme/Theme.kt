@@ -36,7 +36,7 @@ fun LocalADBTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            window.statusBarColor = 0xFF1E1E1E.toArgb()
+            window.statusBarColor = Color(0xFF1E1E1E).toArgb()
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
         }
     }
