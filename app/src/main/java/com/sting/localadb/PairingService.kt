@@ -152,7 +152,7 @@ class PairingService : Service() {
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("LocalADB")
             .setContentText(contentText)
-            .setSmallIcon(android.R.drawable.ic_menu_terminal)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
