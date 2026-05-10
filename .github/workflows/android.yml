@@ -2,8 +2,13 @@ name: Build APK
 
 on:
   push:
-    branches: [main]
+    branches: [main, v2.0]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version name'
+        required: false
+        default: 'v2.0'
 
 permissions:
   contents: write
@@ -15,6 +20,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
 
       - uses: actions/setup-java@v4
         with:
@@ -35,8 +42,8 @@ jobs:
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0
-          name: LocalADB v1.0
+          tag_name: v2.0
+          name: LocalADB v2.0
           draft: false
           prerelease: false
           files: app/build/outputs/apk/debug/app-debug.apk
