@@ -5,7 +5,7 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.Socket
-import java.net.InetAddress
+import java.net.InetSocketAddress
 
 /**
  * ADB command execution via TCP socket to local ADB daemon
@@ -34,7 +34,7 @@ object AdbManager {
             // 3. Read response
 
             val socket = Socket()
-            socket.connect(InetAddress.getByName(targetIp), targetPort, 5000)
+            socket.connect(InetSocketAddress(targetIp, targetPort), 5000)
             socket.soTimeout = 15000
 
             val output = socket.getOutputStream()
@@ -87,7 +87,7 @@ object AdbManager {
             currentPort = port
 
             val socket = Socket()
-            socket.connect(InetAddress.getByName(ip), port, 5000)
+            socket.connect(InetSocketAddress(ip, port), 5000)
             socket.soTimeout = 5000
 
             // Send CNXN
