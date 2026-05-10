@@ -1,18 +1,57 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Network permissions -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Foreground service -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Wake lock for long-running service -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
+        android:name=".LocalAdbApplication"
         android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
         android:label="LocalADB"
-        android:theme="@style/Theme.AppCompat.Light.DarkActionBar">
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.LocalADB"
+        tools:targetApi="34">
+
         <activity
-            android:name="com.sting.localadb.MainActivity"
-            android:exported="true">
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.LocalADB">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".PairingService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="wireless_adb_pairing" />
+        </service>
+
+        <receiver
+            android:name=".PairingReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.sting.localadb.PAIR_CODE" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>
