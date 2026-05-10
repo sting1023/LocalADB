@@ -1,6 +1,5 @@
 package com.sting.localadb
 
-import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -9,7 +8,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
-import android.view.inputmethod.EditorInfo
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -24,7 +22,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -32,7 +29,6 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationCompat
-import androidx.core.app.RemoteInput
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sting.localadb.ui.theme.LocalADBTheme
 
@@ -45,7 +41,6 @@ class MainActivity : ComponentActivity() {
         const val CHANNEL_ID = "localadb_pairing"
         const val NOTIFICATION_ID = 1001
         const val ACTION_PAIR_CODE = "com.sting.localadb.PAIR_CODE"
-        const val KEY_CODE = "key_code"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,20 +90,16 @@ class MainActivity : ComponentActivity() {
                                 fontSize = 12.sp,
                                 fontFamily = FontFamily.Monospace
                             )
+                            val (statusText, statusColor) = when (uiState) {
+                                PairingService.ConnectionState.CONNECTED -> "✅ 已连接" to Color(0xFF00FF00)
+                                PairingService.ConnectionState.PAIRING -> "⏳ 配对中" to Color(0xFFFFFF00)
+                                PairingService.ConnectionState.WAITING_PAIRING -> "⚠️ 等待配对" to Color(0xFFFFFF00)
+                                PairingService.ConnectionState.ERROR -> "❌ 错误" to Color(0xFFFF0000)
+                                else -> "○ 未连接" to Color(0xFF888888)
+                            }
                             Text(
-                                text = when (uiState) {
-                                    PairingService.ConnectionState.CONNECTED -> "✅ 已连接"
-                                    PairingService.ConnectionState.PAIRING -> "⏳ 配对中"
-                                    PairingService.ConnectionState.WAITING_PAIRING -> "⚠️ 等待配对"
-                                    PairingService.ConnectionState.ERROR -> "❌ 错误"
-                                    else -> "○ 未连接"
-                                },
-                                color = when (uiState) {
-                                    PairingService.ConnectionState.CONNECTED -> Color(0xFF00FF00)
-                                    PairingService.ConnectionState.PAIRING -> Color(0xFFFFFF00)
-                                    PairingService.ConnectionState.ERROR -> Color(0xFFFF0000)
-                                    else -> Color(0xFF888888)
-                                },
+                                text = statusText,
+                                color = statusColor,
                                 fontSize = 12.sp,
                                 fontFamily = FontFamily.Monospace
                             )
@@ -128,18 +119,19 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.verticalScroll(rememberScrollState())
                             ) {
                                 outputLines.forEach { line ->
+                                    val lineColor = when {
+                                        line.startsWith("✅") -> Color(0xFF00FF00)
+                                        line.startsWith("❌") -> Color(0xFFFF4444)
+                                        line.startsWith("⚠️") -> Color(0xFFFFFF00)
+                                        line.startsWith("⏳") -> Color(0xFFFFFF00)
+                                        line.startsWith("→") -> Color(0xFF00CCFF)
+                                        line.startsWith("$") -> Color(0xFFFFFFFF)
+                                        line.startsWith("─") -> Color(0xFF444444)
+                                        else -> Color(0xFFCCCCCC)
+                                    }
                                     Text(
                                         text = line,
-                                        color = when {
-                                            line.startsWith("✅") -> Color(0xFF00FF00)
-                                            line.startsWith("❌") -> Color(0xFFFF4444)
-                                            line.startsWith("⚠️") -> Color(0xFFFFFF00)
-                                            line.startsWith("⏳") -> Color(0xFFFFFF00)
-                                            line.startsWith("→") -> Color(0xFF00CCFF)
-                                            line.startsWith("$") -> Color(0xFFFFFFFF)
-                                            line.startsWith("─") -> Color(0xFF444444)
-                                            else -> Color(0xFFCCCCCC)
-                                        },
+                                        color = lineColor,
                                         fontSize = 14.sp,
                                         fontFamily = FontFamily.Monospace,
                                         modifier = Modifier.padding(vertical = 1.dp)
@@ -172,7 +164,7 @@ class MainActivity : ComponentActivity() {
                                 focusedContainerColor = Color(0xFF1A1A1A),
                                 unfocusedContainerColor = Color(0xFF1A1A1A)
                             ),
-                            fontFamily = FontFamily.Monospace,
+                            textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace),
                             keyboardOptions = KeyboardOptions(
                                 capitalization = KeyboardCapitalization.None,
                                 imeAction = ImeAction.Send
@@ -204,6 +196,14 @@ class MainActivity : ComponentActivity() {
                                 Text("清空", color = Color.White)
                             }
 
+                            val buttonColor = if (uiState == PairingService.ConnectionState.WAITING_PAIRING)
+                                Color(0xFF0066FF) else Color(0xFF00AA00)
+                            val buttonText = when (uiState) {
+                                PairingService.ConnectionState.WAITING_PAIRING -> "配对"
+                                PairingService.ConnectionState.CONNECTED -> "已连接"
+                                else -> "连接"
+                            }
+
                             Button(
                                 onClick = {
                                     if (uiState == PairingService.ConnectionState.WAITING_PAIRING) {
@@ -212,20 +212,10 @@ class MainActivity : ComponentActivity() {
                                         viewModel.connect()
                                     }
                                 },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (uiState == PairingService.ConnectionState.WAITING_PAIRING)
-                                        Color(0xFF0066FF) else Color(0xFF00AA00)
-                                ),
+                                colors = ButtonDefaults.buttonColors(containerColor = buttonColor),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text(
-                                    text = when (uiState) {
-                                        PairingService.ConnectionState.WAITING_PAIRING -> "配对"
-                                        PairingService.ConnectionState.CONNECTED -> "已连接"
-                                        else -> "连接"
-                                    },
-                                    color = Color.White
-                                )
+                                Text(text = buttonText, color = Color.White)
                             }
                         }
                     }
