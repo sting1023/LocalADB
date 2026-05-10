@@ -3,8 +3,8 @@ package com.sting.localadb
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.*
+import java.net.InetSocketAddress
 import java.net.Socket
-import java.net.InetAddress
 
 /**
  * Pure Kotlin ADB pairing implementation.
@@ -21,11 +21,11 @@ object AdbPairing {
     suspend fun connect(ip: String, port: Int): Boolean = withContext(Dispatchers.IO) {
         try {
             val socket = Socket()
-            socket.connect(InetAddress.getByName(ip), port, CONN_TIMEOUT)
-            
+            socket.connect(InetSocketAddress(ip, port), CONN_TIMEOUT)
+
             // Send ADB CNXN packet
             val connectPayload = "host::\u0000".toByteArray()
-            val packet = createAdbPacket(0x00000001, connectPayload.size.toUInt(), connectPayload)
+            val packet = createAdbPacket(0x00000001u, connectPayload.size.toUInt(), connectPayload)
             socket.outputStream.write(packet)
             socket.outputStream.flush()
 
@@ -34,7 +34,7 @@ object AdbPairing {
             val len = socket.inputStream.read(response)
             socket.close()
 
-            len > 0 && (response[4].toInt() and 0xFF) == 0x00000001 // CNXN OK
+            len > 0 && (response[4].toInt() and 0xFF) == 0x01 // CNXN OK
         } catch (e: Exception) {
             e.printStackTrace()
             false
@@ -43,21 +43,16 @@ object AdbPairing {
 
     /**
      * Pair with ADB daemon using pairing code
-     * Flow:
-     * 1. Connect to device
-     * 2. Send 'adb pair' command with code
-     * 3. Verify success
-     * 4. Reconnect with auth
      */
     suspend fun pair(ip: String, port: Int, code: String): Boolean = withContext(Dispatchers.IO) {
         try {
             val socket = Socket()
-            socket.connect(InetAddress.getByName(ip), port, CONN_TIMEOUT)
+            socket.connect(InetSocketAddress(ip, port), CONN_TIMEOUT)
             socket.soTimeout = 10000
 
             // Step 1: Initial CNXN
             val connectPayload = "host::\u0000".toByteArray()
-            val cnxnPacket = createAdbPacket(0x00000001, connectPayload.size.toUInt(), connectPayload)
+            val cnxnPacket = createAdbPacket(0x00000001u, connectPayload.size.toUInt(), connectPayload)
             socket.outputStream.write(cnxnPacket)
             socket.outputStream.flush()
 
@@ -70,8 +65,8 @@ object AdbPairing {
             }
 
             // Step 2: Send pair request
-            val pairCmd = "pair:${code}\u0000".toByteArray()
-            val pairPacket = createAdbPacket(0x00000002, pairCmd.size.toUInt(), pairCmd)
+            val pairCmd = "pair:$code\u0000".toByteArray()
+            val pairPacket = createAdbPacket(0x00000002u, pairCmd.size.toUInt(), pairCmd)
             socket.outputStream.write(pairPacket)
             socket.outputStream.flush()
 
@@ -82,9 +77,9 @@ object AdbPairing {
 
             if (pairLen <= 0) return@withContext false
 
-            // Check for OK response (0x00000001 for CNXN, 0x00000002 for CLSE)
+            // Check for OK response
             val cmd = bytesToUint(pairResponse.copyOfRange(4, 8))
-            cmd == 0x00000002.toUInt() // Success response
+            cmd == 0x00000002u // Success response
         } catch (e: Exception) {
             e.printStackTrace()
             false
@@ -96,36 +91,46 @@ object AdbPairing {
      */
     private fun createAdbPacket(command: UInt, arg0: UInt, arg1: UInt, payload: ByteArray): ByteArray {
         val header = ByteArray(24)
-        
-        // Magic (4 bytes)
+
+        // Magic (4 bytes) - "ASYNC"
         header[0] = 0x41 // 'A'
         header[1] = 0x53 // 'S'
         header[2] = 0x59 // 'Y'
-        header[3] = 0x4e // 'N'
+        header[3] = 0x4E // 'N'
 
         // Command (4 bytes)
-        val cmdBytes = uintToBytes(command)
-        System.arraycopy(cmdBytes, 0, header, 4, 4)
+        header[4] = (command.toInt() and 0xFF).toByte()
+        header[5] = (command.toInt() shr 8 and 0xFF).toByte()
+        header[6] = (command.toInt() shr 16 and 0xFF).toByte()
+        header[7] = (command.toInt() shr 24 and 0xFF).toByte()
 
         // Arg0 (4 bytes)
-        val arg0Bytes = uintToBytes(arg0)
-        System.arraycopy(arg0Bytes, 0, header, 8, 4)
+        header[8] = (arg0.toInt() and 0xFF).toByte()
+        header[9] = (arg0.toInt() shr 8 and 0xFF).toByte()
+        header[10] = (arg0.toInt() shr 16 and 0xFF).toByte()
+        header[11] = (arg0.toInt() shr 24 and 0xFF).toByte()
 
         // Arg1 (4 bytes)
-        val arg1Bytes = uintToBytes(arg1)
-        System.arraycopy(arg1Bytes, 0, header, 12, 4)
+        header[12] = (arg1.toInt() and 0xFF).toByte()
+        header[13] = (arg1.toInt() shr 8 and 0xFF).toByte()
+        header[14] = (arg1.toInt() shr 16 and 0xFF).toByte()
+        header[15] = (arg1.toInt() shr 24 and 0xFF).toByte()
 
         // Payload length (4 bytes)
-        val payloadLen = uintToBytes(payload.size.toUInt())
-        System.arraycopy(payloadLen, 0, header, 16, 4)
+        header[16] = (payload.size and 0xFF).toByte()
+        header[17] = (payload.size shr 8 and 0xFF).toByte()
+        header[18] = (payload.size shr 16 and 0xFF).toByte()
+        header[19] = (payload.size shr 24 and 0xFF).toByte()
 
         // Checksum (4 bytes) - simple sum
-        var checksum: UInt = 0u
+        var checksum = 0
         for (b in payload) {
-            checksum += b.toUInt()
+            checksum += b.toInt() and 0xFF
         }
-        val checksumBytes = uintToBytes(checksum)
-        System.arraycopy(checksumBytes, 0, header, 20, 4)
+        header[20] = (checksum and 0xFF).toByte()
+        header[21] = (checksum shr 8 and 0xFF).toByte()
+        header[22] = (checksum shr 16 and 0xFF).toByte()
+        header[23] = (checksum shr 24 and 0xFF).toByte()
 
         // Combine header + payload
         val packet = ByteArray(24 + payload.size)
@@ -139,20 +144,11 @@ object AdbPairing {
         return createAdbPacket(command, 0u, 0u, payload)
     }
 
-    private fun uintToBytes(value: UInt): ByteArray {
-        return byteArrayOf(
-            (value.toInt() and 0xFF).toByte(),
-            (value.toInt() shr 8 and 0xFF).toByte(),
-            (value.toInt() shr 16 and 0xFF).toByte(),
-            (value.toInt() shr 24 and 0xFF).toByte()
-        )
-    }
-
     private fun bytesToUint(bytes: ByteArray): UInt {
         if (bytes.size < 4) return 0u
         return ((bytes[0].toInt() and 0xFF) or
-                (bytes[1].toInt() and 0xFF shl 8) or
-                (bytes[2].toInt() and 0xFF shl 16) or
-                (bytes[3].toInt() and 0xFF shl 24)).toUInt()
+                ((bytes[1].toInt() and 0xFF) shl 8) or
+                ((bytes[2].toInt() and 0xFF) shl 16) or
+                ((bytes[3].toInt() and 0xFF) shl 24)).toUInt()
     }
 }
