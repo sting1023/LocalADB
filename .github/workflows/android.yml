@@ -1,32 +1,46 @@
-name: Test Build
+name: Build APK
 
 on:
   push:
-    branches: [v2.0]
+    branches: [main, v2.0]
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: List files
-        run: |
-          echo "=== Root ==="
-          ls -la
-          echo ""
-          echo "=== app/ ==="
-          ls -la app/
-          echo ""
-          echo "=== app/src/main/ ==="
-          ls -la app/src/main/
-          echo ""
-          echo "=== app/src/main/java/ ==="
-          ls -la app/src/main/java/
-          echo ""
-          echo "=== Kotlin files ==="
-          find app/src/main -name "*.kt" -type f
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Create local.properties
+        run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon --no-build-cache
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v2.0
+          name: LocalADB v2.0
+          draft: false
+          prerelease: false
+          files: app/build/outputs/apk/debug/app-debug.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
