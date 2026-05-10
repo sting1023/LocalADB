@@ -9,14 +9,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
-import android.text.Editable
-import android.text.TextWatcher
-import android.view.View
-import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
-import android.widget.EditText
-import android.widget.FrameLayout
-import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -31,31 +24,27 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.NotificationCompat
 import androidx.core.app.RemoteInput
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.sting.localadb.ui.theme.LocalADBTheme
-import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var notificationManager: NotificationManager
     private var pairingReceiver: BroadcastReceiver? = null
 
-    // Notification channel and IDs
     companion object {
         const val CHANNEL_ID = "localadb_pairing"
         const val NOTIFICATION_ID = 1001
         const val ACTION_PAIR_CODE = "com.sting.localadb.PAIR_CODE"
-        const val EXTRA_CODE = "pair_code"
         const val KEY_CODE = "key_code"
     }
 
@@ -163,7 +152,6 @@ class MainActivity : ComponentActivity() {
 
                         // Command input
                         val focusManager = LocalFocusManager.current
-                        val scope = rememberCoroutineScope()
 
                         OutlinedTextField(
                             value = currentCommand,
@@ -213,7 +201,7 @@ class MainActivity : ComponentActivity() {
                                 ),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text("清空", color = Color(0xFFFFFFFF))
+                                Text("清空", color = Color.White)
                             }
 
                             Button(
@@ -263,9 +251,8 @@ class MainActivity : ComponentActivity() {
         pairingReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action == ACTION_PAIR_CODE) {
-                    val code = intent.getStringExtra(EXTRA_CODE) ?: ""
+                    val code = intent.getStringExtra("code") ?: ""
                     if (code.length == 6) {
-                        // Forward to service
                         val serviceIntent = Intent(this@MainActivity, PairingService::class.java).apply {
                             action = PairingService.ACTION_PAIR
                             putExtra(PairingService.EXTRA_CODE, code)
@@ -285,14 +272,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showPairingNotification() {
-        val channelId = CHANNEL_ID
-
-        // Use RemoteInput for voice/typing input on Android 7+
-        val remoteInput = RemoteInput.Builder(KEY_CODE)
-            .setLabel("输入6位配对码")
-            .setChoices(arrayOf("123456", "111111", "222222"))
-            .build()
-
         val pendingIntent = PendingIntent.getActivity(
             this,
             0,
@@ -300,39 +279,16 @@ class MainActivity : ComponentActivity() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        // Action to submit pairing code
-        val submitIntent = Intent(this, PairingReceiver::class.java).apply {
-            action = ACTION_PAIR_CODE
-        }
-        val submitPendingIntent = PendingIntent.getBroadcast(
-            this,
-            0,
-            submitIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        val notificationCompatBuilder = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(android.R.drawable.ic_menu_terminal)
-            .setContentTitle("LocalADB 配对")
-            .setContentText("无线调试已开启，请在通知栏输入配对码")
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle("LocalADB")
+            .setContentText("点击启动配对")
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .extend(NotificationCompat.WearableExtender()
-                .addAction(
-                    android.R.drawable.ic_menu_preferences,
-                    "输入配对码",
-                    pendingIntent
-                )
-            )
+            .setContentIntent(pendingIntent)
+            .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT_WATCH) {
-            notificationCompatBuilder
-                .addAction(RemoteInput.buildRobotIconBackIcon())
-                .addRemoteInput(remoteInput)
-        }
-
-        notificationManager.notify(NOTIFICATION_ID, notificationCompatBuilder.build())
+        notificationManager.notify(NOTIFICATION_ID, notification)
     }
 
     override fun onDestroy() {
@@ -341,17 +297,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/**
- * Receiver for handling notification pairing code input
- */
 class PairingReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
         if (intent?.action == MainActivity.ACTION_PAIR_CODE) {
-            val remoteInput = RemoteInput.getResultsFromIntent(intent)
-            val code = remoteInput?.getCharSequence(MainActivity.KEY_CODE)?.toString()
-
-            if (!code.isNullOrBlank()) {
-                // Send to service
+            val code = intent.getStringExtra("code") ?: ""
+            if (code.length == 6) {
                 val serviceIntent = Intent(context, PairingService::class.java).apply {
                     action = PairingService.ACTION_PAIR
                     putExtra(PairingService.EXTRA_CODE, code)
